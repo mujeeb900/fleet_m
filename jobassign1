@@ -1,0 +1,321 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Nov 19 13:15:29 2018
+
+@author: mujee
+"""
+
+import numpy as np
+import pandas as pd
+import datetime as dt
+
+def bustype(buslist, btype):
+    global busprop
+    output=[]
+    for i in buslist:
+        if 'temp' in i: continue
+        if busprop[busprop['Bus']==i]['Type'].iloc[0]==btype:
+            output.append(i)
+    return output
+
+def routematch(buslist, route):
+    if buslist==[]: return []
+    global busprop
+    route2=route[4:]+"-"+route[:3]
+    output=[]
+    for i in buslist:
+        if 'temp' in i: continue
+        if (busprop[busprop['Bus']==i]['Route'].iloc[0]==route) or (busprop[busprop['Bus']==i]['Route'].iloc[0]==route2):
+            output.append(i)
+    return output
+
+def routemismatch(buslist, departure, arrival):
+    if buslist==[]: return []
+    global busprop
+    output=[]
+    for i in buslist:
+        if 'temp' in i: continue
+        if (departure not in busprop[busprop['Bus']==i]['Route'].iloc[0]) and (arrival in busprop[busprop['Bus']==i]['Route'].iloc[0]):
+            output.append(i)
+    return output
+
+'''
+routelist = pd.read_excel('routelist.xlsx', sheet_name='Sheet4')
+busprop=pd.read_excel('buses properties.xlsx', sheet_name='Buses')
+october=pd.read_excel('October2018.xlsx', sheet_name='Sheet1')
+stay=pd.read_excel('stay.xlsx', sheet_name='Sheet2')
+stay['Stay']=stay['Stay'].apply(lambda x:dt.timedelta(hours=x.hour, minutes=x.minute))
+
+busprop['Route']=busprop['Route1'].apply(lambda x:x[:3]+"-"+x[4:])
+mylist=pd.merge(october,routelist[['Route','Trip','Km','Step', "Arrival"]],on='Route', how='left')
+df=mylist.drop(columns=["Schedule departure", "Step",'Actual Departure Time', 'Last Travelled','Comments','Km','Step','Arrival_y'])
+df=df[df["Bus"]!="Drop"]
+df.loc[df['Trip']!=df['Trip'],'Trip']=2359
+df["Trip"]=df["Trip"].apply(int)
+df["Trip"]=df["Trip"].apply(str)
+df["min"]=df["Trip"].apply(lambda x:x[len(x)-2:]).apply(int)
+df["hour"]=df["Trip"].apply(lambda x:x[0:len(x)-2]).apply(int)
+df["triptime"]=df["min"].apply(lambda x: np.timedelta64(x,'m'))+df["hour"].apply(lambda x: np.timedelta64(x,'h'))
+df=df.drop(columns=['Trip','min','hour'])
+
+df["depdate"]=df["datetime"].apply(lambda x:x if int(x.strftime("%M"))%15==0 else x+pd.to_timedelta(15-int(x.strftime("%M"))%15,'m'))
+df["arrdate"]=df["depdate"]+df["triptime"]
+df["arrdate"]=df["arrdate"].apply(lambda x:x if int(x.strftime("%M"))%15==0 else x+pd.to_timedelta(15-int(x.strftime("%M"))%15,'m'))
+df['triptime']=df['arrdate']-df['depdate']
+df['Departure']=df['Route'].apply(lambda x:x[:3])
+
+gold=list(busprop[busprop['Type']==1]['Bus'])
+luxury=list(busprop[busprop['Type']==2]['Bus'])
+luxuryr=['LHR-RWP','LHR-MTN','LHR-FSD','FSD-LHR','MTN-LHR','RWP-LHR']
+df['Type']=3
+
+for j in gold:
+    df.loc[df.Bus==j, 'Type']=1
+
+for j in luxury:
+    for i in luxuryr:
+        df.loc[(df.Bus==j) & (df.Route11==i), 'Type']=2
+
+df=pd.merge(df, stay, on='Route11', how='left')
+df.loc[df['Stay']!=df['Stay'],'Stay']=dt.time(0,0)
+'''
+planfrom=pd.Timestamp('2018-10-20 00:00:00')
+plantill=pd.Timestamp('2018-10-21 23:59:00')
+
+dfhalf=df[df['Date']<planfrom]
+dfhalf=dfhalf.reset_index()
+busloc={}
+bustime={}
+
+for i in dfhalf.index:
+    busloc[dfhalf.iloc[i]['Bus']]=dfhalf.iloc[i]['Actual Arrival']
+    bustime[dfhalf.iloc[i]['Bus']]=dfhalf.iloc[i]['arrdate']
+
+for i in bustime:
+    if bustime[i]<planfrom:
+        bustime[i]=planfrom-pd.Timedelta('0 days 01:00:00')
+
+tlist=sorted(list(set(list(df['depdate'])+list(df['arrdate']))))
+tlist=[item for item in tlist if item >=planfrom]
+tlist=[planfrom-pd.Timedelta('0 days 01:00:00')]+tlist
+cities=list(set(list(df['Actual Arrival'])))
+
+opsbuses=[]
+r={}
+for city in cities:
+    temp={}
+    count=0
+    for t in tlist:
+        count+=1
+        if count<=200:
+            unused=[]
+            for b in busloc:
+                if busloc[b]==city and bustime[b]==t:
+                    unused.append(b)
+            temp[t]={'used':[],'unused':unused}
+        else:
+            temp[t]={'used':[],'unused':[]}
+    r[city]=temp
+
+deponly=df[df['Terminal']==df['Terminal']]
+deponly=deponly[deponly['depdate']>=planfrom]
+deponly=deponly[deponly['depdate']<plantill]
+
+dfdict=deponly[['Departure','Arrival_x','depdate','triptime','arrdate', 'Type', 'Stay', 'Route11']].to_dict('split')
+
+count=0
+mismatchcount=0
+routecount=0
+for t in range(len(tlist)):
+    for s in dfdict['data']:
+        text=""
+        tick=1
+        if s[2]!=tlist[t]:
+            tick=0
+            continue;
+        if (len(r[s[0]][s[2]]['used'])+len(r[s[0]][s[2]]['unused']))==0:
+            if (len(r[s[0]][s[2]+pd.Timedelta(minutes=15)]['used'])+len(r[s[0]][s[2]+pd.Timedelta(minutes=15)]['unused']))!=0:
+                if len(r[s[0]][s[2]+pd.Timedelta(minutes=15)]['used'])!=0:
+                    bus=r[s[0]][s[2]+pd.Timedelta(minutes=15)]['used'][0]
+                    r[s[0]][s[2]+pd.Timedelta(minutes=15)]['used'].remove(bus)
+                    text='less stay by 15 mins, used'
+                else:
+                    bus=r[s[0]][s[2]+pd.Timedelta(minutes=15)]['unused'][0]
+                    r[s[0]][s[2]+pd.Timedelta(minutes=15)]['unused'].remove(bus)
+                    text='less stay by 15 mins, unused'
+                    
+            elif (len(r[s[0]][s[2]+pd.Timedelta(minutes=30)]['used'])+len(r[s[0]][s[2]+pd.Timedelta(minutes=30)]['unused']))!=0:
+                if len(r[s[0]][s[2]+pd.Timedelta(minutes=30)]['used'])!=0:
+                    bus=r[s[0]][s[2]+pd.Timedelta(minutes=30)]['used'][0]
+                    r[s[0]][s[2]+pd.Timedelta(minutes=30)]['used'].remove(bus)
+                    text='less stay by 30 mins, used'
+                else:
+                    bus=r[s[0]][s[2]+pd.Timedelta(minutes=30)]['unused'][0]
+                    r[s[0]][s[2]+pd.Timedelta(minutes=30)]['unused'].remove(bus)
+                    text='less stay by 30 mins, unused'
+
+            elif (len(r[s[0]][s[2]+pd.Timedelta(minutes=45)]['used'])+len(r[s[0]][s[2]+pd.Timedelta(minutes=45)]['unused']))!=0:
+                if len(r[s[0]][s[2]+pd.Timedelta(minutes=45)]['used'])!=0:
+                    bus=r[s[0]][s[2]+pd.Timedelta(minutes=45)]['used'][0]
+                    r[s[0]][s[2]+pd.Timedelta(minutes=45)]['used'].remove(bus)
+                    text='less stay by 45 mins, used'
+                else:
+                    bus=r[s[0]][s[2]+pd.Timedelta(minutes=45)]['unused'][0]
+                    r[s[0]][s[2]+pd.Timedelta(minutes=45)]['unused'].remove(bus)
+                    text='less stay by 45 mins, unused'
+            else:    
+                bus='temp'+str(count)
+                count+=1
+                text='no bus'
+        else:
+            usedlist=bustype(r[s[0]][s[2]]['used'],s[5])
+            unusedlist=bustype(r[s[0]][s[2]]['unused'],s[5])
+            used_route=routematch(usedlist,s[7])
+            unused_route=routematch(unusedlist,s[7])
+            used_nonroute=routemismatch(usedlist,s[0],s[1])
+            unused_nonroute=routemismatch(unusedlist,s[0],s[1])
+
+            if len(used_route)>0:
+                bus=used_route[0]
+                r[s[0]][s[2]]['used'].remove(bus)
+                text='on route, used'
+                routecount+=1
+            elif len(unused_route)>0:
+                bus=unused_route[0]
+                r[s[0]][s[2]]['unused'].remove(bus)
+                text='on route, unused'
+                routecount+=1
+            else:
+                temptime=s[2]+pd.Timedelta(minutes=15)
+                usedlist_temp=bustype(r[s[0]][temptime]['used'],s[5])            
+                used_routetemp=routematch(usedlist_temp,s[7])
+                unusedlist_temp=bustype(r[s[0]][temptime]['unused'],s[5])
+                unused_routetemp=routematch(unusedlist_temp,s[7])
+
+                if len(used_routetemp)>0:
+                    bus=used_routetemp[0]
+                    r[s[0]][temptime]['used'].remove(bus)
+                    text='on route, used, 15'
+                    routecount+=1
+                elif len(unused_routetemp)>0:
+                    bus=unused_routetemp[0]
+                    r[s[0]][temptime]['unused'].remove(bus)
+                    text='on route, unused, 15'
+                    routecount+=1
+                else:
+                    temptime=s[2]+pd.Timedelta(minutes=30)
+                    usedlist_temp=bustype(r[s[0]][temptime]['used'],s[5])            
+                    used_routetemp=routematch(usedlist_temp,s[7])
+                    unusedlist_temp=bustype(r[s[0]][temptime]['unused'],s[5])
+                    unused_routetemp=routematch(unusedlist_temp,s[7])
+
+                    if len(used_routetemp)>0:
+                        bus=used_routetemp[0]
+                        r[s[0]][temptime]['used'].remove(bus)
+                        text='on route, used, 30'
+                        routecount+=1
+                    elif len(unused_routetemp)>0:
+                        bus=unused_routetemp[0]
+                        r[s[0]][temptime]['unused'].remove(bus)
+                        text='on route, unused, 30'
+                        routecount+=1
+                    elif len(used_nonroute)>0:
+                        bus=used_nonroute[0]
+                        r[s[0]][s[2]]['used'].remove(bus)
+                        text='non route, used'
+                    elif len(unused_nonroute)>0:
+                        bus=unused_nonroute[0]
+                        r[s[0]][s[2]]['unused'].remove(bus)
+                        text='non route, unused'
+                
+                    elif len(usedlist)>0:
+                        bus=usedlist[0]
+                        r[s[0]][s[2]]['used'].remove(bus)
+                        text='type match, used'
+                    elif len(unusedlist)>0:
+                        bus=unusedlist[0]
+                        r[s[0]][s[2]]['unused'].remove(bus)
+                        text='type match, unused'
+
+                    elif len(r[s[0]][s[2]]['used'])>0:
+                        bus=r[s[0]][s[2]]['used'][0]
+                        r[s[0]][s[2]]['used'].remove(bus)
+                        text='type mismatch, used'
+                        mismatchcount+=1
+                    else:
+                        bus=r[s[0]][s[2]]['unused'][0]
+                        r[s[0]][s[2]]['unused'].remove(bus)
+                        text='type mismatch, unused'
+                        mismatchcount+=1
+
+        opsbuses.append(bus)
+        s.append(bus)
+        s.append(text)
+        route=((s[0]+"-"+s[1]).encode('ascii','ignore'))
+        st=stay[stay['Route11']==route]['Stay'].iloc[0]
+        if '30' in text:
+            arr=s[4]+st-pd.Timedelta(minutes=30)
+        elif '15' in text:
+            arr=s[4]+st-pd.Timedelta(minutes=15)
+        else:
+            arr=s[4]+st
+        if arr not in tlist:
+            tlist.append(arr)
+            tlist=sorted(tlist)
+            for city in cities:
+                r[city][arr]={'used':[],'unused':[]}
+        r[s[1]][arr]['used']=[bus]+r[s[1]][arr]['used']
+
+    if t==len(tlist)-1:
+        continue
+    for city in cities:
+        r[city][tlist[t+1]]['used']=r[city][tlist[t]]['used']+r[city][tlist[t+1]]['used']
+        r[city][tlist[t+1]]['unused']=r[city][tlist[t]]['unused']+r[city][tlist[t+1]]['unused']
+
+dfpd=pd.DataFrame.from_dict(dfdict['data'])
+dfpd=dfpd.rename(index=str, columns={0:'Dep',1:'Arr',2:'Dtime',3:'Ttime',4:'Atime',5:'Type',6:'Stime',7:'Route',8:'Bus',9:'Text'})
+bushistory=busprop.copy()
+for bus in list(busprop['Bus']):
+    sublist=dfpd[dfpd['Bus']==bus]
+
+
+#temp[t]=({'used':[],'unused':[x.encode('UTF8') for x in list(dfhalf[(dfhalf['Arrival_x']==city) & (dfhaf['arrdate']==t)]['Bus'])]})
+
+'''
+len(set(list(deponly['Bus'])))
+len(set(opsbuses))
+count=0
+matchcount=0
+for t in range(len(tlist)):
+    for s in dfdict['data']:
+        tick=1
+        if s[2]!=tlist[t]:
+            tick=0
+            continue;
+        if (len(r[s[0]][s[2]]['used'])+len(r[s[0]][s[2]]['unused']))==0:
+            bus='temp'+str(count)
+            count+=1
+        elif len(r[s[0]][s[2]]['used'])>0:
+            usedlist=bustype(r[s[0]][s[2]]['used'],s[5])
+            if len(used)
+            bus=usedlist[0]
+            r[s[0]][s[2]]['used'].remove(bus)
+        else:
+            unusedlist=r[s[0]][s[2]]['unused']
+            bus=unusedlist[0]
+            r[s[0]][s[2]]['unused'].remove(bus)
+        
+        opsbuses.append(bus)
+        s.append(bus)
+        route=((s[0]+"-"+s[1]).encode('ascii','ignore'))
+        st=stay[stay['Route11']==route]['Stay'].iloc[0]
+        r[s[1]][s[4]+st]['used']=[bus]+r[s[1]][s[4]+st]['used']
+        
+    if t==len(tlist)-1:
+        continue
+    for city in cities:
+        r[city][tlist[t+1]]['used']=r[city][tlist[t]]['used']+r[city][tlist[t+1]]['used']
+        r[city][tlist[t+1]]['unused']=r[city][tlist[t]]['unused']+r[city][tlist[t+1]]['unused']
+        
+dfpd=pd.DataFrame.from_dict(dfdict['data'])
+'''
